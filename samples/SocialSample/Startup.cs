@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -88,6 +90,7 @@ namespace SocialSample
             {
                 o.ClientId = Configuration["google:clientid"];
                 o.ClientSecret = Configuration["google:clientsecret"];
+                o.AccessType = "offline";
                 o.SaveTokens = true;
                 o.Events = new OAuthEvents()
                 {
@@ -195,7 +198,7 @@ namespace SocialSample
             });
         }
 
-        public void Configure(IApplicationBuilder app)
+        public void Configure(IApplicationBuilder app, IAuthenticationHandlerProvider authSchemes)
         {
             app.UseDeveloperExceptionPage();
 
@@ -224,6 +227,99 @@ namespace SocialSample
                         // REVIEW: we lost access to display name (which is buried in the handler options)
                         await context.Response.WriteAsync("<a href=\"?authscheme=" + provider.Name + "\">" + (provider.DisplayName ?? "(suppressed)") + "</a><br>");
                     }
+                    await context.Response.WriteAsync("</body></html>");
+                });
+            });
+
+            // Refresh the access token
+            app.Map("/refresh_token", signinApp =>
+            {
+                signinApp.Run(async context =>
+                {
+                    // Setting DefaultAuthenticateScheme causes User to be set
+                    // var user = context.User;
+
+                    // This is what [Authorize] calls
+                    var userResult = await context.AuthenticateAsync();
+                    var user = userResult.Principal;
+                    var authProperties = userResult.Properties;
+
+                    // This is what [Authorize(ActiveAuthenticationSchemes = MicrosoftAccountDefaults.AuthenticationScheme)] calls
+                    // var user = await context.AuthenticateAsync(MicrosoftAccountDefaults.AuthenticationScheme);
+
+                    // Deny anonymous request beyond this point.
+                    if (!userResult.Succeeded || user == null || !user.Identities.Any(identity => identity.IsAuthenticated))
+                    {
+                        // This is what [Authorize] calls
+                        // The cookie middleware will handle this and redirect to /login
+                        await context.ChallengeAsync();
+
+                        // This is what [Authorize(ActiveAuthenticationSchemes = MicrosoftAccountDefaults.AuthenticationScheme)] calls
+                        // await context.ChallengeAsync(MicrosoftAccountDefaults.AuthenticationScheme);
+
+                        return;
+                    }
+
+                    var refreshToken = authProperties.GetTokenValue("refresh_token");
+
+                    if (string.IsNullOrEmpty(refreshToken))
+                    {
+                        context.Response.ContentType = "text/html";
+                        await context.Response.WriteAsync("<html><body>");
+                        await context.Response.WriteAsync("No refresh_token is available.<br>");
+                        await context.Response.WriteAsync("<a href=\"/\">Home</a>");
+                        await context.Response.WriteAsync("</body></html>");
+                    }
+
+                    if (string.Equals(GoogleDefaults.AuthenticationScheme, user.Identities.First().AuthenticationType))
+                    {
+                        var handler = (AuthenticationHandler<GoogleOptions>)await authSchemes.GetHandlerAsync(context, GoogleDefaults.AuthenticationScheme);
+
+                        var pairs = new Dictionary<string, string>()
+                        {
+                            { "client_id", handler.Options.ClientId },
+                            { "client_secret", handler.Options.ClientSecret },
+                            { "grant_type", "refresh_token" },
+                            { "refresh_token", refreshToken }
+                        };
+                        var content = new FormUrlEncodedContent(pairs);
+                        var response = await handler.Options.Backchannel.PostAsync(GoogleDefaults.TokenEndpoint, content, context.RequestAborted);
+                        response.EnsureSuccessStatusCode();
+
+                        var payload = JObject.Parse(await response.Content.ReadAsStringAsync());
+
+                        // Persist the new acess token
+                        authProperties.UpdateTokenValue("access_token", payload.Value<string>("access_token"));
+                        if (int.TryParse(payload.Value<string>("expires_in"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var seconds))
+                        {
+                            var expiresAt = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(seconds);
+                            authProperties.UpdateTokenValue("expires_at", expiresAt.ToString("o", CultureInfo.InvariantCulture));
+                        }
+                        await context.SignInAsync(user, authProperties);
+
+                        context.Response.ContentType = "text/html";
+                        await context.Response.WriteAsync("<html><body>");
+                        await context.Response.WriteAsync("Refreshed.<br>");
+                        await context.Response.WriteAsync(HtmlEncoder.Default.Encode(payload.ToString()).Replace(",", ",<br>") + "<br>");
+
+                        await context.Response.WriteAsync("<br>Tokens:<br>");
+
+                        await context.Response.WriteAsync("Access Token: " + authProperties.GetTokenValue("access_token") + "<br>");
+                        await context.Response.WriteAsync("Refresh Token: " + authProperties.GetTokenValue("refresh_token") + "<br>");
+                        await context.Response.WriteAsync("Token Type: " + authProperties.GetTokenValue("token_type") + "<br>");
+                        await context.Response.WriteAsync("expires_at: " + authProperties.GetTokenValue("expires_at") + "<br>");
+
+                        await context.Response.WriteAsync("<a href=\"/\">Home</a><br>");
+                        await context.Response.WriteAsync("<a href=\"/refresh_token\">Refresh Token</a><br>");
+                        await context.Response.WriteAsync("</body></html>");
+
+                        return;
+                    }
+
+                    context.Response.ContentType = "text/html";
+                    await context.Response.WriteAsync("<html><body>");
+                    await context.Response.WriteAsync("Refresh has not been implemented for this provider.<br>");
+                    await context.Response.WriteAsync("<a href=\"/\">Home</a>");
                     await context.Response.WriteAsync("</body></html>");
                 });
             });
@@ -271,7 +367,7 @@ namespace SocialSample
                 if (user == null || !user.Identities.Any(identity => identity.IsAuthenticated))
                 {
                     // This is what [Authorize] calls
-                    // The cookie middleware will intercept this 401 and redirect to /login
+                    // The cookie middleware will handle this and redirect to /login
                     await context.ChallengeAsync();
 
                     // This is what [Authorize(ActiveAuthenticationSchemes = MicrosoftAccountDefaults.AuthenticationScheme)] calls
@@ -296,6 +392,7 @@ namespace SocialSample
                 await context.Response.WriteAsync("Token Type: " + await context.GetTokenAsync("token_type") + "<br>");
                 await context.Response.WriteAsync("expires_at: " + await context.GetTokenAsync("expires_at") + "<br>");
                 await context.Response.WriteAsync("<a href=\"/logout\">Logout</a><br>");
+                await context.Response.WriteAsync("<a href=\"/refresh_token\">Refresh Token</a><br>");
                 await context.Response.WriteAsync("</body></html>");
             });
         }

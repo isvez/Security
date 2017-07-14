@@ -218,16 +218,17 @@ namespace SocialSample
                         return;
                     }
 
-                    context.Response.ContentType = "text/html";
-                    await context.Response.WriteAsync("<html><body>");
-                    await context.Response.WriteAsync("Choose an authentication scheme: <br>");
+                    var response = context.Response;
+                    response.ContentType = "text/html";
+                    await response.WriteAsync("<html><body>");
+                    await response.WriteAsync("Choose an authentication scheme: <br>");
                     var schemeProvider = context.RequestServices.GetRequiredService<IAuthenticationSchemeProvider>();
                     foreach (var provider in await schemeProvider.GetAllSchemesAsync())
                     {
                         // REVIEW: we lost access to display name (which is buried in the handler options)
-                        await context.Response.WriteAsync("<a href=\"?authscheme=" + provider.Name + "\">" + (provider.DisplayName ?? "(suppressed)") + "</a><br>");
+                        await response.WriteAsync("<a href=\"?authscheme=" + provider.Name + "\">" + (provider.DisplayName ?? "(suppressed)") + "</a><br>");
                     }
-                    await context.Response.WriteAsync("</body></html>");
+                    await response.WriteAsync("</body></html>");
                 });
             });
 
@@ -236,6 +237,8 @@ namespace SocialSample
             {
                 signinApp.Run(async context =>
                 {
+                    var response = context.Response;
+
                     // Setting DefaultAuthenticateScheme causes User to be set
                     // var user = context.User;
 
@@ -264,11 +267,11 @@ namespace SocialSample
 
                     if (string.IsNullOrEmpty(refreshToken))
                     {
-                        context.Response.ContentType = "text/html";
-                        await context.Response.WriteAsync("<html><body>");
-                        await context.Response.WriteAsync("No refresh_token is available.<br>");
-                        await context.Response.WriteAsync("<a href=\"/\">Home</a>");
-                        await context.Response.WriteAsync("</body></html>");
+                        response.ContentType = "text/html";
+                        await response.WriteAsync("<html><body>");
+                        await response.WriteAsync("No refresh_token is available.<br>");
+                        await response.WriteAsync("<a href=\"/\">Home</a>");
+                        await response.WriteAsync("</body></html>");
                     }
 
                     if (string.Equals(GoogleDefaults.AuthenticationScheme, user.Identities.First().AuthenticationType))
@@ -283,10 +286,10 @@ namespace SocialSample
                             { "refresh_token", refreshToken }
                         };
                         var content = new FormUrlEncodedContent(pairs);
-                        var response = await handler.Options.Backchannel.PostAsync(GoogleDefaults.TokenEndpoint, content, context.RequestAborted);
-                        response.EnsureSuccessStatusCode();
+                        var refreshResponse = await handler.Options.Backchannel.PostAsync(handler.Options.TokenEndpoint, content, context.RequestAborted);
+                        refreshResponse.EnsureSuccessStatusCode();
 
-                        var payload = JObject.Parse(await response.Content.ReadAsStringAsync());
+                        var payload = JObject.Parse(await refreshResponse.Content.ReadAsStringAsync());
 
                         // Persist the new acess token
                         authProperties.UpdateTokenValue("access_token", payload.Value<string>("access_token"));
@@ -297,30 +300,30 @@ namespace SocialSample
                         }
                         await context.SignInAsync(user, authProperties);
 
-                        context.Response.ContentType = "text/html";
-                        await context.Response.WriteAsync("<html><body>");
-                        await context.Response.WriteAsync("Refreshed.<br>");
-                        await context.Response.WriteAsync(HtmlEncoder.Default.Encode(payload.ToString()).Replace(",", ",<br>") + "<br>");
+                        response.ContentType = "text/html";
+                        await response.WriteAsync("<html><body>");
+                        await response.WriteAsync("Refreshed.<br>");
+                        await response.WriteAsync(HtmlEncoder.Default.Encode(payload.ToString()).Replace(",", ",<br>") + "<br>");
 
-                        await context.Response.WriteAsync("<br>Tokens:<br>");
+                        await response.WriteAsync("<br>Tokens:<br>");
 
-                        await context.Response.WriteAsync("Access Token: " + authProperties.GetTokenValue("access_token") + "<br>");
-                        await context.Response.WriteAsync("Refresh Token: " + authProperties.GetTokenValue("refresh_token") + "<br>");
-                        await context.Response.WriteAsync("Token Type: " + authProperties.GetTokenValue("token_type") + "<br>");
-                        await context.Response.WriteAsync("expires_at: " + authProperties.GetTokenValue("expires_at") + "<br>");
+                        await response.WriteAsync("Access Token: " + authProperties.GetTokenValue("access_token") + "<br>");
+                        await response.WriteAsync("Refresh Token: " + authProperties.GetTokenValue("refresh_token") + "<br>");
+                        await response.WriteAsync("Token Type: " + authProperties.GetTokenValue("token_type") + "<br>");
+                        await response.WriteAsync("expires_at: " + authProperties.GetTokenValue("expires_at") + "<br>");
 
-                        await context.Response.WriteAsync("<a href=\"/\">Home</a><br>");
-                        await context.Response.WriteAsync("<a href=\"/refresh_token\">Refresh Token</a><br>");
-                        await context.Response.WriteAsync("</body></html>");
+                        await response.WriteAsync("<a href=\"/\">Home</a><br>");
+                        await response.WriteAsync("<a href=\"/refresh_token\">Refresh Token</a><br>");
+                        await response.WriteAsync("</body></html>");
 
                         return;
                     }
 
-                    context.Response.ContentType = "text/html";
-                    await context.Response.WriteAsync("<html><body>");
-                    await context.Response.WriteAsync("Refresh has not been implemented for this provider.<br>");
-                    await context.Response.WriteAsync("<a href=\"/\">Home</a>");
-                    await context.Response.WriteAsync("</body></html>");
+                    response.ContentType = "text/html";
+                    await response.WriteAsync("<html><body>");
+                    await response.WriteAsync("Refresh has not been implemented for this provider.<br>");
+                    await response.WriteAsync("<a href=\"/\">Home</a>");
+                    await response.WriteAsync("</body></html>");
                 });
             });
 
@@ -329,12 +332,13 @@ namespace SocialSample
             {
                 signoutApp.Run(async context =>
                 {
-                    context.Response.ContentType = "text/html";
+                    var response = context.Response;
+                    response.ContentType = "text/html";
                     await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-                    await context.Response.WriteAsync("<html><body>");
-                    await context.Response.WriteAsync("You have been logged out. Goodbye " + context.User.Identity.Name + "<br>");
-                    await context.Response.WriteAsync("<a href=\"/\">Home</a>");
-                    await context.Response.WriteAsync("</body></html>");
+                    await response.WriteAsync("<html><body>");
+                    await response.WriteAsync("You have been logged out. Goodbye " + context.User.Identity.Name + "<br>");
+                    await response.WriteAsync("<a href=\"/\">Home</a>");
+                    await response.WriteAsync("</body></html>");
                 });
             });
 
@@ -343,11 +347,12 @@ namespace SocialSample
             {
                 errorApp.Run(async context =>
                 {
-                    context.Response.ContentType = "text/html";
-                    await context.Response.WriteAsync("<html><body>");
-                    await context.Response.WriteAsync("An remote failure has occurred: " + context.Request.Query["FailureMessage"] + "<br>");
-                    await context.Response.WriteAsync("<a href=\"/\">Home</a>");
-                    await context.Response.WriteAsync("</body></html>");
+                    var response = context.Response;
+                    response.ContentType = "text/html";
+                    await response.WriteAsync("<html><body>");
+                    await response.WriteAsync("An remote failure has occurred: " + context.Request.Query["FailureMessage"] + "<br>");
+                    await response.WriteAsync("<a href=\"/\">Home</a>");
+                    await response.WriteAsync("</body></html>");
                 });
             });
 
@@ -377,23 +382,24 @@ namespace SocialSample
                 }
 
                 // Display user information
-                context.Response.ContentType = "text/html";
-                await context.Response.WriteAsync("<html><body>");
-                await context.Response.WriteAsync("Hello " + (context.User.Identity.Name ?? "anonymous") + "<br>");
+                var response = context.Response;
+                response.ContentType = "text/html";
+                await response.WriteAsync("<html><body>");
+                await response.WriteAsync("Hello " + (context.User.Identity.Name ?? "anonymous") + "<br>");
                 foreach (var claim in context.User.Claims)
                 {
-                    await context.Response.WriteAsync(claim.Type + ": " + claim.Value + "<br>");
+                    await response.WriteAsync(claim.Type + ": " + claim.Value + "<br>");
                 }
 
-                await context.Response.WriteAsync("Tokens:<br>");
+                await response.WriteAsync("Tokens:<br>");
                 
-                await context.Response.WriteAsync("Access Token: " + await context.GetTokenAsync("access_token") + "<br>");
-                await context.Response.WriteAsync("Refresh Token: " + await context.GetTokenAsync("refresh_token") + "<br>");
-                await context.Response.WriteAsync("Token Type: " + await context.GetTokenAsync("token_type") + "<br>");
-                await context.Response.WriteAsync("expires_at: " + await context.GetTokenAsync("expires_at") + "<br>");
-                await context.Response.WriteAsync("<a href=\"/logout\">Logout</a><br>");
-                await context.Response.WriteAsync("<a href=\"/refresh_token\">Refresh Token</a><br>");
-                await context.Response.WriteAsync("</body></html>");
+                await response.WriteAsync("Access Token: " + await context.GetTokenAsync("access_token") + "<br>");
+                await response.WriteAsync("Refresh Token: " + await context.GetTokenAsync("refresh_token") + "<br>");
+                await response.WriteAsync("Token Type: " + await context.GetTokenAsync("token_type") + "<br>");
+                await response.WriteAsync("expires_at: " + await context.GetTokenAsync("expires_at") + "<br>");
+                await response.WriteAsync("<a href=\"/logout\">Logout</a><br>");
+                await response.WriteAsync("<a href=\"/refresh_token\">Refresh Token</a><br>");
+                await response.WriteAsync("</body></html>");
             });
         }
     }
